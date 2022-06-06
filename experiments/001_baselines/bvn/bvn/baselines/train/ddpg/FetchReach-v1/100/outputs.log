@@ -1,0 +1,154 @@
+══════════════════════════════════════════
+[33m        job         [0m
+────────────────────┬─────────────────────
+    script_path     │ None                
+    script_root     │ /home/jason/bvn/experiments
+      counter       │ 1                   
+       prefix       │ bvn/bvn/baselines/train/ddpg/FetchReach-v1/100
+        name        │ ddpg/FetchReach-v1/100
+       status       │ created             
+     createTime     │ 2022-06-06 21:36:31.736319
+════════════════════╧═════════════════════
+[33m      revision      [0m
+────────────────────┬─────────────────────
+        hash        │ None                
+       branch       │ refs/heads/master   
+════════════════════╧═════════════════════
+[33m         fn         [0m
+────────────────────┬─────────────────────
+        name        │ main                
+        doc         │ None                
+       module       │ rl                  
+        file        │ /home/jason/bvn/rl/__init__.py
+════════════════════╧═════════════════════
+[33m        args        [0m
+────────────────────┬─────────────────────
+({'Args.clip_inputs': True, 'Args.normalize_inputs': True, 'Args.agent_type': 'ddpg', 'Args.env_name': 'FetchReach-v1', 'Args.n_workers': 2, 'Args.n_epochs': 50, 'Args.seed': 100, 'RUN.job_name': 'ddpg/FetchReach-v1/100', 'RUN.prefix': 'bvn/bvn/baselines/train/ddpg/FetchReach-v1/100'},)
+════════════════════╧═════════════════════
+[33m       kwargs       [0m
+────────────────────┬─────────────────────
+════════════════════╧═════════════════════
+taking diff, if this step takes too long, check if your uncommitted changes are too large.
+not storing the git diff due to Command 'cd "/home/jason/bvn/experiments/001_baselines" && git diff HEAD --binary' returned non-zero exit status 128.
+══════════════════════════════════════════
+[33m        job         [0m
+────────────────────┬─────────────────────
+       job_id       │ None                
+       status       │ started             
+     startTime      │ 2022-06-06 21:36:31.823716
+════════════════════╧═════════════════════
+[33m        host        [0m
+────────────────────┬─────────────────────
+      hostname      │ newton1             
+════════════════════╧═════════════════════
+══════════════════════════════════════════
+[33m        Args        [0m
+────────────────────┬─────────────────────
+       debug        │ False               
+    record_video    │ False               
+ record_video_freq  │ 10                  
+     train_type     │ online              
+     agent_type     │ ddpg                
+policy_output_scale │ 1.0                 
+initial_temperature │ 1.0                 
+temperature_optimizer_lr│ 0.0003              
+   entropy_target   │ action_size         
+ smooth_targ_policy │ True                
+     reinit_phi     │ False               
+     freeze_phi     │ False               
+      reinit_f      │ False               
+      freeze_f      │ False               
+    freeze_norm     │ False               
+    critic_type     │ td                  
+ critic_reduce_type │ norm                
+  metric_embed_dim  │ 16                  
+  metric_norm_ord   │ 2                   
+n_actor_optim_steps │ 1                   
+   object_relabel   │ False               
+      env_name      │ FetchReach-v1       
+   test_env_name    │ None                
+        seed        │ 100                 
+     load_seed      │ 123                 
+      save_dir      │ experiments/        
+     ckpt_name      │                     
+    resume_ckpt     │                     
+     n_workers      │ 2                   
+        cuda        │ None                
+num_rollouts_per_mpi│ 1                   
+      n_epochs      │ 50                  
+      n_cycles      │ 10                  
+   optimize_every   │ 2                   
+     n_batches      │ 1                   
+      hid_size      │ 256                 
+       n_hids       │ 3                   
+       activ        │ relu                
+     noise_eps      │ 0.1                 
+     random_eps     │ 0.2                 
+    buffer_size     │ 2500000             
+      future_p      │ 0.8                 
+     batch_size     │ 1024                
+    clip_inputs     │ True                
+      clip_obs      │ 200                 
+  normalize_inputs  │ True                
+     clip_range     │ 5                   
+       gamma        │ 0.98                
+    clip_return     │ 50                  
+     action_l2      │ 0.01                
+      lr_actor      │ 0.001               
+     lr_critic      │ 0.001               
+       polyak       │ 0.995               
+ target_update_freq │ 10                  
+  checkpoint_freq   │ 10                  
+ n_initial_rollouts │ 100                 
+  n_test_rollouts   │ 15                  
+    demo_length     │ 20                  
+        play        │ None                
+════════════════════╧═════════════════════
+[33m        LfGR        [0m
+────────────────────┬─────────────────────
+      use_lfgr      │ False               
+       start        │ 10                  
+   store_interval   │ 10                  
+visualization_interval│ 10                  
+  plan_buffer_size  │ 5000                
+      k_steps       │ 4                   
+  relabel_k_steps   │ 2                   
+       d_max        │ 2                   
+       d_min        │ 0.8                 
+   optimize_every   │ 2                   
+      relabel       │ backward            
+     batch_size     │ 32                  
+  use_state_bucket  │ True                
+  obs_bucket_size   │ 32                  
+════════════════════╧═════════════════════
+[33m       OMEGA        [0m
+────────────────────┬─────────────────────
+     use_omega      │ False               
+ use_behavior_goal  │ False               
+    no_q_cutoff     │ False               
+   kde_bandwidth    │ 0.1                 
+         n          │ 10000               
+════════════════════╧═════════════════════
+Traceback (most recent call last):
+  File "/home/jason/miniconda3/envs/bvn/lib/python3.10/site-packages/ml_logger/__init__.py", line 211, in thunk
+    results = fn(*(args or ARGS), **_KWARGS)
+  File "/home/jason/bvn/rl/__init__.py", line 124, in main
+    algo = launch(deps)
+  File "/home/jason/bvn/rl/launcher.py", line 97, in launch
+    env_params, reward_func = get_env_params(Args.env_name)
+  File "/home/jason/bvn/rl/launcher.py", line 18, in get_env_params
+    env = gym.make(env_id)
+  File "/home/jason/miniconda3/envs/bvn/lib/python3.10/site-packages/gym/envs/registration.py", line 582, in make
+    _check_version_exists(ns, name, version)
+  File "/home/jason/miniconda3/envs/bvn/lib/python3.10/site-packages/gym/envs/registration.py", line 201, in _check_version_exists
+    _check_name_exists(ns, name)
+  File "/home/jason/miniconda3/envs/bvn/lib/python3.10/site-packages/gym/envs/registration.py", line 179, in _check_name_exists
+    raise error.NameNotFound(
+gym.error.NameNotFound: Environment FetchReach doesn't exist. 
+
+══════════════════════════════════════════
+[33m        job         [0m
+────────────────────┬─────────────────────
+       status       │ errored             
+     errorTime      │ 2022-06-06 21:36:34.143734
+════════════════════╧═════════════════════

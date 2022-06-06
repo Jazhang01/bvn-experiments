@@ -1,0 +1,16 @@
+Traceback (most recent call last):
+  File "/home/jason/miniconda3/envs/bvn/lib/python3.10/site-packages/ml_logger/__init__.py", line 211, in thunk
+    results = fn(*(args or ARGS), **_KWARGS)
+  File "/home/jason/bvn/rl/__init__.py", line 124, in main
+    algo = launch(deps)
+  File "/home/jason/bvn/rl/launcher.py", line 97, in launch
+    env_params, reward_func = get_env_params(Args.env_name)
+  File "/home/jason/bvn/rl/launcher.py", line 18, in get_env_params
+    env = gym.make(env_id)
+  File "/home/jason/miniconda3/envs/bvn/lib/python3.10/site-packages/gym/envs/registration.py", line 582, in make
+    _check_version_exists(ns, name, version)
+  File "/home/jason/miniconda3/envs/bvn/lib/python3.10/site-packages/gym/envs/registration.py", line 201, in _check_version_exists
+    _check_name_exists(ns, name)
+  File "/home/jason/miniconda3/envs/bvn/lib/python3.10/site-packages/gym/envs/registration.py", line 179, in _check_name_exists
+    raise error.NameNotFound(
+gym.error.NameNotFound: Environment FetchReach doesn't exist. 

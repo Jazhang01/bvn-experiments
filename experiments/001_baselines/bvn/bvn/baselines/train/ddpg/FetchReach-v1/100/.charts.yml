@@ -1,0 +1,21 @@
+keys:
+- run.status
+- Args.env_name
+- host.hostname
+charts:
+- yKeys: [test/success, train/success/mean]
+  xKey: env_steps
+  yDomain: [0, 1]
+- yKeys: [test/success, train/success/mean]
+  xKey: epoch
+  yDomain: [0, 1]
+- yKeys: [q_ag2/mean, q_future/mean, q_bg/mean]
+  xKey: epoch
+- yKeys: [intersection_loss/mean, neighbor_loss/mean, tension_loss/mean]
+  xKey: epoch
+- yKeys: [r/mean, r_ag_ag2/mean, r_future_ag/mean]
+  xKey: epoch
+- type: video
+  glob: "**/*_agent.mp4"
+- yKey: dt_epoch
+  xKey: epoch
