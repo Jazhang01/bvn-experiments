@@ -520,7 +520,7 @@ class BaseAgent:
     def to_tensor(self, x):
         x = torch.tensor(x, dtype=torch.float32)
         if self.args.cuda:
-            x = x.cuda()
+            x = x.cuda(self.device)
         return x
 
     @property
@@ -599,10 +599,10 @@ class Agent(BaseAgent):
         self.g_normalizer = Normalizer(size=env_params['goal'], default_clip_range=self.args.clip_range)
 
     def cuda(self):
-        self.actor.cuda()
-        self.critic.cuda()
-        self.actor_targ.cuda()
-        self.critic_targ.cuda()  
+        self.actor.cuda(self.device)
+        self.critic.cuda(self.device)
+        self.actor_targ.cuda(self.device)
+        self.critic_targ.cuda(self.device)  
 
     def _preprocess_inputs(self, obs, goal):
         # add conditional here
@@ -710,12 +710,12 @@ class TD3Agent(Agent):
         self.g_normalizer = Normalizer(size=env_params['goal'], default_clip_range=self.args.clip_range)
 
     def cuda(self):
-        self.actor.cuda()
-        self.critic.cuda()
-        self.critic2.cuda()
-        self.actor_targ.cuda()
-        self.critic_targ.cuda()
-        self.critic2_targ.cuda()
+        self.actor.cuda(self.device)
+        self.critic.cuda(self.device)
+        self.critic2.cuda(self.device)
+        self.actor_targ.cuda(self.device)
+        self.critic_targ.cuda(self.device)
+        self.critic2_targ.cuda(self.device)
 
     def get_qs(self, obs, goal, actions, critic_id):
         obs, goal = self._preprocess_inputs(obs, goal)
@@ -811,12 +811,12 @@ class SACAgent(Agent):
         self.g_normalizer = Normalizer(size=env_params['goal'], default_clip_range=self.args.clip_range)
         
     def cuda(self):
-        self.actor.cuda()
-        self.critic.cuda()
-        self.critic2.cuda()
-        self.critic_targ.cuda()
-        self.critic2_targ.cuda()
-        self.log_alpha.cuda()
+        self.actor.cuda(self.device)
+        self.critic.cuda(self.device)
+        self.critic2.cuda(self.device)
+        self.critic_targ.cuda(self.device)
+        self.critic2_targ.cuda(self.device)
+        self.log_alpha.cuda(self.device)
 
     def get_qs(self, obs, goal, actions, critic_id):
         obs, goal = self._preprocess_inputs(obs, goal)

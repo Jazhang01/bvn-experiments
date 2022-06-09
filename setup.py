@@ -8,8 +8,11 @@ setup(
     name="bvn",
     py_modules=["rl"],
     install_requires=[
+        "wandb",
         "cloudpickle",
-        "gym[atari,box2d,classic_control]",
+        "opencv-python",
+        "gym[atari,box2d,classic_control]==0.20.0",
+        "mujoco-py==2.0.2.8",
         "ipython",
         "joblib",
         "matplotlib",
@@ -30,7 +33,11 @@ setup(
         "sklearn",
         "networkx",
         "graph_search",
-        "sparse_graphs"
+        "sparse_graphs",
+        "graphene==2.1.3",
+        "graphql-core==2.1",
+        "graphql-relay==0.4.5",
+        "graphql-server-core==1.1.1"
     ],
     description="A collection of clean implementation of reinforcement learning algorithms",
     author="Annoymous",

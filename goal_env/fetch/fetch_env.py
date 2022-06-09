@@ -3,9 +3,8 @@ from gym.envs.robotics import rotations, utils
 import numpy as np
 import numbers
 
-from fetch.common import robot_env
-from fetch.common.utils import goal_distance
-
+from gym.envs.robotics import robot_env
+from gym.envs.robotics.fetch_env import goal_distance
 
 def assign(o, *objs):
     for ob in objs:
@@ -14,8 +13,7 @@ def assign(o, *objs):
 
 
 class FetchEnv(robot_env.RobotEnv):
-    """Superclass for all Fetch environments.
-    """
+    """Superclass for all Fetch environments."""
 
     def __init__(
             self, model_path, n_substeps, gripper_extra_height, block_gripper,

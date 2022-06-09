@@ -3,22 +3,27 @@ from params_proto.neo_hyper import Sweep
 from rl import Args, main
 
 from jaynes import jaynes
-from ml_logger import logger
 from params_proto.neo_hyper import Sweep
 
 if __name__ == '__main__':
     from experiments import RUN, instr
 
     with Sweep(RUN, Args) as sweep:
+        Args.cuda = True
+        Args.record_video=True
         Args.clip_inputs = True
         Args.normalize_inputs = True
-        Args.agent_type = 'ddpg'
+        Args.agent_type = 'ddpg'    # todo: there is a problem with using 'sac' and 'td3' and 'cuda' together. parent class calls child class' method.
 
         with sweep.product:
             with sweep.zip:
-                Args.env_name = ['FetchReach-v1', 'FetchPush-v1', 'FetchPickAndPlace-v1', 'FetchSlide-v1']
-                Args.n_workers = [2, 8, 16, 20]
-                Args.n_epochs = [50, 150, 200, 500]
+                Args.env_name = ['FetchPickAndPlace-v1']
+                Args.n_workers = [2]
+                Args.n_epochs = [250]
+
+                # Args.env_name = ['FetchReach-v1', 'FetchPush-v1', 'FetchPickAndPlace-v1', 'FetchSlide-v1']
+                # Args.n_workers = [2, 2, 2, 2]  # [2, 8, 16, 20]
+                # Args.n_epochs = [50, 150, 200, 500]
 
             Args.seed = [100, 200, 300, 400, 500]            
 

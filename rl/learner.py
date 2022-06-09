@@ -142,7 +142,7 @@ class Learner:
             self.logger.store(loss_actor=loss_actor.item(),
                               action_l2=action_l2.item(),
                             #   loss_bc=loss_bc.item(),
-                              q_pi=q_pi.mean().numpy(), )
+                              q_pi=q_pi.mean().cpu().numpy(), )
 
         return loss_actor
 
@@ -272,7 +272,7 @@ class TD3Learner(Learner):
             self.logger.store(loss_actor=loss_actor.item(),
                             action_l2=action_l2.item(),
                             # loss_bc=loss_bc.item(),
-                            q_pi=q_pi.mean().numpy(), )
+                            q_pi=q_pi.mean().cpu().numpy(), )
 
         return loss_actor
 
@@ -395,7 +395,7 @@ class SACLearner(Learner):
                             # loss_bc=loss_bc.item(),
                             entropy_term=ent.detach.cpu().numpy(),
                             temperature=self.agent.alpha.item(),
-                            q_pi=q.mean().numpy(),)
+                            q_pi=q.mean().cpu().numpy(),)
     
         return loss_actor, temp_loss
 

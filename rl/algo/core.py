@@ -50,7 +50,7 @@ class BaseAlgo:
         if args.resume_ckpt:
             self.load_checkpoint(args.resume_ckpt)
 
-    def run_eval(self, video_path=None):
+    def run_eval(self, video_path=None, width=256, height=256):
         import gym
         env = self.test_env or self.env
         env_id = (Args.test_env_name or Args.env_name).split(':')[-1]
@@ -67,7 +67,7 @@ class BaseAlgo:
             ag = observation['achieved_goal']
             ag_origin = ag.copy()
             if Args.record_video and video_path and n_test == 0:
-                img = env.render("rgb_array", width=200, height=200)
+                img = env.render("rgb_array", width=width, height=height)
                 frames.append(img)
             for timestep in range(env_spec.max_episode_steps):
                 a = self.agent.get_actions(ob, bg)
@@ -79,7 +79,7 @@ class BaseAlgo:
                 self.logger.store_key_value('test/AgChangeRatio', np.mean(ag_changed))
 
                 if video_path and n_test == 0:
-                    img = env.render("rgb_array", width=200, height=200)
+                    img = env.render("rgb_array", width=width, height=height)
                     frames.append(img)
 
             for per_env_info in [info] if isinstance(info, dict) else info:
