@@ -78,7 +78,7 @@ class BaseAlgo:
                 ag_changed = np.abs(self.reward_func(ag_origin, ag, None))
                 self.logger.store_key_value('test/AgChangeRatio', np.mean(ag_changed))
 
-                if video_path and n_test == 0:
+                if Args.record_video and video_path and n_test == 0:
                     img = env.render("rgb_array", width=width, height=height)
                     frames.append(img)
 
@@ -162,7 +162,11 @@ class Algo(BaseAlgo):
         # the DDPG agent does not have hard/soft mode.
         logger.start('train')
         for n_train in range(self.args.n_batches):
-            batch = self.replay.sample(batch_size=batch_size)
+            if self.args.do_relabel_filter:
+                relabel_filter = self.env_params['is_train_goal']
+            else:
+                relabel_filter = None
+            batch = self.replay.sample(batch_size=batch_size, relabel_filter=relabel_filter)
 
             if Args.object_relabel:
                 batch = relabel(batch)
@@ -183,7 +187,11 @@ class Algo(BaseAlgo):
         bg = observation['desired_goal']
 
         if train_agent and OMEGA.use_omega:
-            batch = self.replay.sample(OMEGA.n)
+            if self.args.do_relabel_filter:
+                relabel_filter = self.env_params['is_train_goal']
+            else:
+                relabel_filter = None
+            batch = self.replay.sample(OMEGA.n, relabel_filter=relabel_filter)
             goal_pool = batch['bg' if OMEGA.use_behavior_goal else 'ag']
             bg = simple_min_kernel_density_model(k=Args.n_workers, goal_pool=goal_pool)
 
@@ -247,10 +255,14 @@ class Algo(BaseAlgo):
 
     def update_normalizer(self, buffer):
         if not self.args.freeze_norm:
+            if self.args.do_relabel_filter:
+                relabel_filter = self.env_params['is_train_goal']
+            else:
+                relabel_filter = None
             transitions = sample_her_transitions(
                 buffer=buffer, reward_func=self.reward_func,
                 batch_size=self.env_params['max_timesteps'] * self.num_envs,
-                future_p=self.args.future_p)
+                future_p=self.args.future_p, relabel_filter=relabel_filter)
             self.agent.normalizer_update(obs=transitions['ob'], goal=transitions['bg'])
 
     def run(self):
@@ -303,6 +315,8 @@ class Algo(BaseAlgo):
 
             if Args.checkpoint_freq and epoch % Args.checkpoint_freq == 0:
                 self.save_checkpoint(f"models/ep_{epoch:04d}")
+                if Args.save_replay_at_checkpoint:
+                    self.replay.save()
                 logger.remove(f"models/{epoch - Args.checkpoint_freq:04d}_cp") 
 
     def state_dict(self):
@@ -318,6 +332,7 @@ class Algo(BaseAlgo):
         self.logger.save_module(self.agent.g_normalizer, checkpoint + "/g_norm.pkl")
 
     def load_checkpoint(self, checkpoint):
+        print(f'CHECKPOINT: {checkpoint}')
         self.logger.load_module(self.agent.actor, checkpoint + "/actor.pkl")
         self.logger.load_module(self.agent.critic, checkpoint + "/critic.pkl")
         self.logger.load_module(self.agent.actor_targ, checkpoint + "/actor.pkl")

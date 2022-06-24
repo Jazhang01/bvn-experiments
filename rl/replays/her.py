@@ -3,7 +3,7 @@ import threading
 import numpy as np
 
 
-def sample_her_transitions(buffer, reward_func, batch_size, future_p=1.0):
+def sample_her_transitions(buffer, reward_func, batch_size, future_p=1.0, relabel_filter=None):
     assert all(k in buffer for k in ['ob', 'ag', 'bg', 'a'])
     buffer['o2'] = buffer['ob'][:, 1:, :]
     buffer['ag2'] = buffer['ag'][:, 1:, :]
@@ -14,10 +14,16 @@ def sample_her_transitions(buffer, reward_func, batch_size, future_p=1.0):
     t_samples = np.random.randint(0, horizon, size=batch_size)
     batch = {key: buffer[key][ep_idxes, t_samples].copy() for key in buffer.keys()}
 
-    her_indexes = np.where(np.random.uniform(size=batch_size) < future_p)
-
     future_offset = (np.random.uniform(size=batch_size) * (horizon - t_samples)).astype(int)
     future_t = (t_samples + 1 + future_offset)
+   
+    if relabel_filter is None:
+        her_indexes = np.where(np.random.uniform(size=batch_size) < future_p)
+    else:
+        candidates = np.where(np.apply_along_axis(relabel_filter, 1, buffer['ag'][ep_idxes, future_t]))[0]
+        # candidates = np.where(np.apply_along_axis(relabel_filter, 1, batch['ag']))[0]  # this is wrong, but doesn't seem to make a big difference
+        her_indexes = np.random.choice(candidates, int(len(candidates)*future_p), replace=False)
+        her_indexes = sorted(her_indexes)
 
     batch['bg'][her_indexes] = buffer['ag'][ep_idxes[her_indexes], future_t[her_indexes]]
     batch['future_ag'] = buffer['ag'][ep_idxes, future_t].copy()
@@ -163,13 +169,15 @@ class Replay:
             self.buffers['a'][idxs] = a_list.copy()
             self.n_transitions_stored += self.horizon * batch_size
 
-    def sample(self, batch_size):
+    def sample(self, batch_size, relabel_filter=None):
         temp_buffers = {}
         with self.lock:
             for key in self.buffers.keys():
                 temp_buffers[key] = self.buffers[key][:self.current_size]
-       
-        transitions = sample_her_transitions(temp_buffers, self.reward_func, batch_size, future_p=self.args.future_p)
+
+        if not self.args.do_relabel_filter:
+            relabel_filter = None
+        transitions = sample_her_transitions(temp_buffers, self.reward_func, batch_size, future_p=self.args.future_p, relabel_filter=relabel_filter)
         return transitions
 
     def _get_storage_idx(self, batch_size):

@@ -1,4 +1,5 @@
 from rl.agent import Critic
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.optim import Adam
@@ -32,9 +33,265 @@ class Learner:
         self.optim_q = Adam(agent.critic.parameters(), lr=args.lr_critic)
         self.optim_pi = Adam(agent.actor.parameters(), lr=args.lr_actor)
 
-        self._save_file = str(name) + '.pt'        
+        self._save_file = str(name) + '.pt'      
+
+    def usfa_critic_loss(self, batch):
+        ### get items from batch
+        o, a, o2, r, bg = batch['ob'], batch['a'], batch['o2'], batch['r'], batch['bg']
+        r = self.agent.to_tensor(r.flatten())
+        r_ag_ag2 = self.agent.to_tensor(batch['r_ag_ag2'].flatten())
+        r_future_ag = self.agent.to_tensor(batch['r_future_ag'].flatten())
+
+        ag, ag2, future_ag, offset = batch['ag'], batch['ag2'], batch['future_ag'], batch['offset']
+        offset = self.agent.to_tensor(offset.flatten())
+        ### get items from batch
+
+        ### calculate the predicted reward as phi^Tw
+        pi_inputs = self.agent._process_inputs(*self.agent._preprocess_inputs(o, bg))
+        action = self.agent.to_tensor(a)
+        pred_r = self.agent.critic.forward_reward(pi_inputs, action)
+        ### calculate the predicted reward as phi^Tw
+
+        ### calculate q target
+        q_next, _ = self.agent.forward(o2, bg, q_target=True, pi_target=True)
+        if self.args.update_with_predict_r:
+            q_targ = pred_r + self.args.gamma * q_next.detach()
+        else:
+            q_targ = r + self.args.gamma * q_next.detach()
+        q_targ = torch.clamp(q_targ, -self.args.clip_return, 0.0)
+        ### calculate q target
+
+        ### experiment: sf loss
+        assert len(o.shape) == 2
+        n_batch, obs_dim = o.shape
+
+        obs_goal = self.agent._process_inputs(*self.agent._preprocess_inputs(o, bg))
+        nextobs_goal = self.agent._process_inputs(*self.agent._preprocess_inputs(o2, bg))
+
+        obs = obs_goal[:, :obs_dim]
+        next_obs = nextobs_goal[:, :obs_dim]
+        goal = obs_goal[:, obs_dim:]
+        
+        next_action = self.agent.actor_targ(nextobs_goal)
+        
+        sa = torch.cat([obs, action / self.agent.critic.act_limit], dim=-1)
+        sag = torch.cat([obs, action / self.agent.critic.act_limit, goal], dim=-1)
+        sag2 = torch.cat([next_obs, next_action / self.agent.critic_targ.act_limit, goal], dim=-1)
+
+        psi = self.agent.critic.psi(sag)
+        phi = self.agent.critic_targ.phi(sa)
+        next_psi = self.agent.critic_targ.psi(sag2)
+        target_psi = phi + self.args.gamma * next_psi
+        
+        loss_sf = F.mse_loss(psi, target_psi.detach())
+        ### experiment: sf loss
+
+        ### calculate the critic loss
+        q_bg = self.agent.get_qs(o, bg, a)
+        loss_q = (q_bg - q_targ).pow(2).mean()
+        loss_r = (pred_r - r).pow(2).mean()
+        loss_critic = loss_q + loss_r
+        ### calculate the critic loss
+
+        ### what is this, i don't know
+        q_ag2 = self.agent.get_qs(o, ag2, a) # not sure what this is
+        loss_ag2 = q_ag2.pow(2).mean() # not sure what this is
+
+        q_future = self.agent.get_qs(o, future_ag, a) # not sure what this is
+        ### what is this, i don't know
+
+        with torch.no_grad():
+            self.logger.store(loss_q=loss_q.item(),
+                            loss_ag2=loss_ag2.item(),
+                            loss_critic=loss_critic.item(),
+                            q_targ=q_targ.mean().item(),
+                            q_bg=q_bg.mean().item(),
+                            q_ag2=q_ag2.mean().item(),
+                            q_future=q_future.mean().item(),
+                            offset=offset.mean().item(),
+                            loss_r=loss_r.mean().item(),
+                            loss_sf=loss_sf,
+                            r=r, r_ag_ag2=r_ag_ag2, r_future_ag=r_future_ag)
+
+        return loss_critic
+    
+
+    def calc_loss_q(self, o, a, o2, g, r=None, predict_reward=False, backprop_predict_r=False):
+        assert predict_reward or r is not None
+        assert not (backprop_predict_r and not predict_reward)
+
+        if predict_reward:
+            action = self.agent.to_tensor(a)
+            pi_inputs = self.agent._process_inputs(*self.agent._preprocess_inputs(o, g))
+            r = self.agent.critic.forward_reward(pi_inputs, action)
+        
+        # q target
+        q_next, _ = self.agent.forward(o2, g, q_target=True, pi_target=True)
+        if backprop_predict_r:
+            q_targ = r + self.args.gamma * q_next.detach()
+        else:
+            q_targ = r.detach() + self.args.gamma * q_next.detach()
+        q_targ = torch.clamp(q_targ, -self.args.clip_return, 0.0)
+
+        # q loss
+        q = self.agent.get_qs(o, g, a)
+        loss_q = (q - q_targ).pow(2).mean()
+
+        return loss_q
+    
+    def calc_loss_r(self, o, a, g, r):
+        action = self.agent.to_tensor(a)
+        pi_inputs = self.agent._process_inputs(*self.agent._preprocess_inputs(o, g))
+        pred_r = self.agent.critic.forward_reward(pi_inputs, action)
+
+        loss_r = (pred_r - r).pow(2).mean()
+        
+        return loss_r
+    
+    def sa_critic_loss(self, batch):
+        ### get items from batch
+        o, a, o2, r, bg = batch['ob'], batch['a'], batch['o2'], batch['r'], batch['bg']
+        ag, ag2, future_ag, offset = batch['ag'], batch['ag2'], batch['future_ag'], batch['offset']
+        r_ag_ag2, r_future_ag = batch['r_ag_ag2'], batch['r_future_ag']
+
+        r = self.agent.to_tensor(r.flatten())
+        r_ag_ag2 = self.agent.to_tensor(r_ag_ag2.flatten())
+        r_future_ag = self.agent.to_tensor(r_future_ag.flatten())
+        offset = self.agent.to_tensor(offset.flatten())
+        ### get items from batch
+
+        ### extra goals
+        bg_permute = np.random.permutation(batch['bg'])
+        bg_sample = torch.distributions.normal.Normal(self.agent.to_tensor(bg),
+                self.agent.to_tensor([1])).sample().cpu().numpy()
+        ### extra goals
+
+        loss_q_bg = self.calc_loss_q(o, a, o2, bg, r, predict_reward=self.args.update_with_predict_r, 
+                                                      backprop_predict_r=self.args.update_with_predict_r)
+        loss_q_future_ag = self.calc_loss_q(o, a, o2, future_ag, r=None, predict_reward=True, backprop_predict_r=False)
+        loss_r = self.calc_loss_r(o, a, bg, r)
+
+        loss_critic = loss_q_bg + loss_q_future_ag + loss_r
+
+        with torch.no_grad():
+            self.logger.store(loss_q=loss_q_bg.item(),
+                            loss_q_future_ag=loss_q_future_ag.item(),
+                            loss_critic=loss_critic.item(),
+                            offset=offset.mean().item(),
+                            loss_r=loss_r.mean().item(),
+                            r=r, r_ag_ag2=r_ag_ag2, r_future_ag=r_future_ag)
+
+        return loss_critic
+
+
+    def sa_critic_loss_old(self, batch):
+        ### get items from batch
+        o, a, o2, r, bg = batch['ob'], batch['a'], batch['o2'], batch['r'], batch['bg']
+        ag, ag2, future_ag, offset = batch['ag'], batch['ag2'], batch['future_ag'], batch['offset']
+        r_ag_ag2, r_future_ag = batch['r_ag_ag2'], batch['r_future_ag']
+
+        # bg_extra = np.random.permutation(batch['bg'])
+        # bg_extra = torch.distributions.normal.Normal(self.agent.to_tensor(bg),
+        #         self.agent.to_tensor([1])).sample().cpu().numpy()
+
+        r = self.agent.to_tensor(r.flatten())
+        r_ag_ag2 = self.agent.to_tensor(r_ag_ag2.flatten())
+        r_future_ag = self.agent.to_tensor(r_future_ag.flatten())
+        offset = self.agent.to_tensor(offset.flatten())
+        ### get items from batch
+
+        ### calculate the predicted reward
+        action = self.agent.to_tensor(a)
+        pi_inputs = self.agent._process_inputs(*self.agent._preprocess_inputs(o, bg))
+        pred_r_bg = self.agent.critic.forward_reward(pi_inputs, action)
+        ### calculate the predicted reward
+
+        ### EXTRA: calculate the predicted reward as phi^Tw
+        # pi_inputs_extra = self.agent._process_inputs(*self.agent._preprocess_inputs(o, bg_extra))
+        # pred_r_extra = self.agent.critic.forward_reward(pi_inputs_extra, action)
+        ### EXTRA: calculate the predicted reward as phi^Tw
+
+        ### calculate q target
+        q_next_bg, _ = self.agent.forward(o2, bg, q_target=True, pi_target=True)
+        if self.args.update_with_predict_r:
+            q_targ_bg = pred_r_bg + self.args.gamma * q_next_bg.detach()
+        else:
+            q_targ_bg = r + self.args.gamma * q_next_bg.detach()
+        q_targ_bg = torch.clamp(q_targ_bg, -self.args.clip_return, 0.0)
+        ### calculate q target
+
+        ### EXTRA: calculate q target
+        # q_next_extra, _ = self.agent.forward(o2, bg_extra, q_target=True, pi_target=True)
+        # q_targ_extra = pred_r_extra.detach() + self.args.gamma * q_next_extra.detach()
+        # q_targ_extra = torch.clamp(q_targ_extra, -self.args.clip_return, 0.0)
+        ### EXTRA: calculate q target
+
+        ### experiment: sf loss
+        assert len(o.shape) == 2
+        n_batch, obs_dim = o.shape
+
+        obs_goal = self.agent._process_inputs(*self.agent._preprocess_inputs(o, bg))
+        nextobs_goal = self.agent._process_inputs(*self.agent._preprocess_inputs(o2, bg))
+
+        obs = obs_goal[:, :obs_dim]
+        next_obs = nextobs_goal[:, :obs_dim]
+        goal = obs_goal[:, obs_dim:]
+        
+        next_action = self.agent.actor_targ(nextobs_goal)
+
+        sa = torch.cat([obs, action / self.agent.critic.act_limit], dim=-1)
+        sa2 = torch.cat([next_obs, next_action / self.agent.critic_targ.act_limit], dim=-1)
+
+        psi = self.agent.critic.psi(sa)
+        phi = self.agent.critic_targ.phi(sa)
+        next_psi = self.agent.critic_targ.psi(sa2)
+        target_psi = phi + self.args.gamma * next_psi
+        
+        loss_sf = F.mse_loss(psi, target_psi.detach())
+        ### experiment: sf loss
+
+        ### calculate the critic loss
+        q_bg = self.agent.get_qs(o, bg, a)
+        loss_q = (q_bg - q_targ_bg).pow(2).mean()
+        loss_r = (pred_r_bg - r).pow(2).mean()
+        loss_critic = loss_q + loss_r
+        ### calculate the critic loss
+
+        ### EXTRA: critic loss
+        # q_bg_extra = self.agent.get_qs(o, bg_extra, a)
+
+        # q_bg = torch.cat([q_bg, q_bg_extra])
+        # q_targ = torch.cat([q_targ, q_targ_extra])
+        ### EXTRA: critic loss
+
+        ### extra information
+        q_ag2 = self.agent.get_qs(o, ag2, a)
+        loss_ag2 = q_ag2.pow(2).mean()
+
+        q_future = self.agent.get_qs(o, future_ag, a)
+        ### extra information
+
+        with torch.no_grad():
+            self.logger.store(loss_q=loss_q.item(),
+                            loss_ag2=loss_ag2.item(),
+                            loss_critic=loss_critic.item(),
+                            q_targ=q_targ_bg.mean().item(),
+                            q_bg=q_bg.mean().item(),
+                            q_ag2=q_ag2.mean().item(),
+                            q_future=q_future.mean().item(),
+                            offset=offset.mean().item(),
+                            loss_r=loss_r.mean().item(),
+                            loss_sf=loss_sf,
+                            r=r, r_ag_ag2=r_ag_ag2, r_future_ag=r_future_ag)
+
+        return loss_critic
 
     def critic_loss(self, batch):
+        if self.args.critic_type == 'sa_metric':
+            return self.sa_critic_loss(batch)
+        if self.args.critic_type == 'usfa_metric':
+            return self.usfa_critic_loss(batch)
+
         o, a, o2, r, bg = batch['ob'], batch['a'], batch['o2'], batch['r'], batch['bg']
         r = self.agent.to_tensor(r.flatten())
         r_ag_ag2 = self.agent.to_tensor(batch['r_ag_ag2'].flatten())

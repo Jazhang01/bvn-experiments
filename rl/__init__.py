@@ -1,7 +1,7 @@
 import sys
 
 from params_proto.neo_proto import ParamsProto, Flag, Proto, PrefixProto
-
+import goal_env.robotics  # needed to register custom gym environments
 
 class Args(PrefixProto):
     """Soft-actor Critic Implementation with SOTA Performance
@@ -9,6 +9,7 @@ class Args(PrefixProto):
     debug = True if "pydevd" in sys.modules else False
     record_video = False
     record_video_freq = 10
+    save_replay_at_checkpoint = False
     train_type = 'online'
     agent_type = 'ddpg'
 
@@ -37,12 +38,16 @@ class Args(PrefixProto):
     
     # For `norm` reduce type
     metric_norm_ord = 2
+
+    # predict r during update for successor affordances
+    update_with_predict_r = False
     
     # Actor
     n_actor_optim_steps = 1
 
     # experimental features
     object_relabel = False
+    add_random_goals = False
 
     env_name = "FetchReach-v1"
     test_env_name = None
@@ -55,6 +60,7 @@ class Args(PrefixProto):
 
     n_workers = 2 if debug else 12
     cuda = Flag("cuda tend to be slower.")
+    cuda_name = 'cuda'
     num_rollouts_per_mpi = 1
 
     n_epochs = 200
@@ -70,6 +76,7 @@ class Args(PrefixProto):
 
     buffer_size = 2500000
     future_p = 0.8
+    do_relabel_filter = False
     batch_size = 1024
 
     clip_inputs = Flag("to turn on input clipping")

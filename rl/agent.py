@@ -505,6 +505,151 @@ class AutoEncSFCritic(nn.Module):
         
         return torch.bmm(psi_embeds.view(n_batch, 1, self.latent_dim), wsg_embeds.view(n_batch, self.latent_dim, 1)).view(n_batch).squeeze()
 
+
+class USFACritic(nn.Module):
+    def __init__(self, env_params, args):
+        super().__init__()
+        self.args = args
+        self.act_limit = env_params['action_max']
+
+        self.obs_dim = env_params['obs']
+        self.act_dim = env_params['action']
+        self.goal_dim = env_params['goal']
+
+        self.latent_dim = embed_dim = args.metric_embed_dim
+
+        self.phi = net_utils.mlp(
+            [self.obs_dim + self.act_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+        self.psi = net_utils.mlp(
+            [self.obs_dim + self.act_dim + self.goal_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+        self.xi = net_utils.mlp(
+            [self.goal_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+    
+    def forward_reward(self, pi_inputs, actions):
+        obses, goals = pi_inputs[:, :self.obs_dim], pi_inputs[:, self.obs_dim:]
+
+        n_batch = pi_inputs.shape[0]
+
+        sa = torch.cat([obses, actions / self.act_limit], dim=-1)  # in the autoenc_sf implementation phi is passed into psi, why?
+        phi_embeds = self.phi(sa)
+        w_embeds = self.xi(goals)
+
+        return torch.bmm(phi_embeds.view(n_batch, 1, self.latent_dim), w_embeds.view(n_batch, self.latent_dim, 1)).view(n_batch).squeeze()
+
+    def forward(self, pi_inputs, actions):
+        # NOTE: assume pi_inputs to be concatenated in the order [obs, goal]
+        obses, goals = pi_inputs[:, :self.obs_dim], pi_inputs[:, self.obs_dim:]
+
+        n_batch = pi_inputs.shape[0]
+
+        sag = torch.cat([obses, actions / self.act_limit, goals], dim=-1)  # in the autoenc_sf implementation phi is passed into psi, why?
+        psi_embeds = self.psi(sag)
+        w_embeds = self.xi(goals)
+
+        return torch.bmm(psi_embeds.view(n_batch, 1, self.latent_dim), w_embeds.view(n_batch, self.latent_dim, 1)).view(n_batch).squeeze()
+
+
+class SACritic(nn.Module):
+    def __init__(self, env_params, args):
+        super().__init__()
+        self.args = args
+        self.act_limit = env_params['action_max']
+
+        self.obs_dim = env_params['obs']
+        self.act_dim = env_params['action']
+        self.goal_dim = env_params['goal']
+
+        self.latent_dim = embed_dim = args.metric_embed_dim
+        self.phi = net_utils.mlp(
+            [self.obs_dim + self.act_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+        # self.phi = net_utils.mlp(
+        #     [self.obs_dim + self.act_dim] + [embed_dim],
+        #     activation=args.activ
+        # )
+        self.psi = net_utils.mlp(
+            [self.obs_dim + self.act_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+        # self.xi = net_utils.mlp(
+            # [self.goal_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            # activation=args.activ
+        # )
+        self.xi = net_utils.mlp(
+            [self.obs_dim + self.goal_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+    
+    def forward_reward(self, pi_inputs, actions):
+        # NOTE: assume pi_inputs to be concatenated in the order [obs, goal]
+        obses, goals = pi_inputs[:, :self.obs_dim], pi_inputs[:, self.obs_dim:]
+
+        n_batch = pi_inputs.shape[0]
+
+        # q = psi(s,a)^Tw(g)
+        sa = torch.cat([obses, actions / self.act_limit], dim=-1)  # in the autoenc_sf implementation phi is passed into psi, why?
+        sg = torch.cat([obses, goals], dim=-1)
+        phi_embeds = self.phi(sa)
+        # w_embeds = self.xi(goals)
+        w_embeds = self.xi(sg)
+
+        return torch.bmm(phi_embeds.view(n_batch, 1, self.latent_dim), w_embeds.view(n_batch, self.latent_dim, 1)).view(n_batch).squeeze()
+
+    def forward(self, pi_inputs, actions):
+        # NOTE: assume pi_inputs to be concatenated in the order [obs, goal]
+        obses, goals = pi_inputs[:, :self.obs_dim], pi_inputs[:, self.obs_dim:]
+
+        n_batch = pi_inputs.shape[0]
+
+        # q = psi(s,a)^Tw(g)
+        sa = torch.cat([obses, actions / self.act_limit], dim=-1)  # in the autoenc_sf implementation phi is passed into psi, why?
+        sg = torch.cat([obses, goals], dim=-1)
+        psi_embeds = self.psi(sa)
+        # w_embeds = self.xi(goals)
+        w_embeds = self.xi(sg)
+
+        return torch.bmm(psi_embeds.view(n_batch, 1, self.latent_dim), w_embeds.view(n_batch, self.latent_dim, 1)).view(n_batch).squeeze()
+
+
+class ASGCritic(nn.Module):
+    def __init__(self, env_params, args):
+        super().__init__()
+        self.args = args
+        self.act_limit = env_params['action_max']
+
+        self.obs_dim = env_params['obs']
+        self.act_dim = env_params['action']
+        self.goal_dim = env_params['goal']
+
+        self.latent_dim = embed_dim = args.metric_embed_dim
+        self.a = net_utils.mlp(
+            [self.act_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+        self.sg = net_utils.mlp(
+            [self.obs_dim + self.goal_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+
+    def forward(self, pi_inputs, actions):
+        # NOTE: assume pi_inputs to be concatenated in the order [obs, goal]
+        obses, goals = pi_inputs[:, :self.obs_dim], pi_inputs[:, self.obs_dim:]
+
+        n_batch = pi_inputs.shape[0]
+
+        a_embeds = self.a(actions / self.act_limit)
+        sg_embeds = self.sg(pi_inputs)
+
+        return torch.bmm(a_embeds.view(n_batch, 1, self.latent_dim), sg_embeds.view(n_batch, self.latent_dim, 1)).view(n_batch).squeeze()
+
+
 class BaseAgent:
     def __init__(self, env_params, args, name='agent'):
         self.env_params = env_params
@@ -525,7 +670,7 @@ class BaseAgent:
 
     @property
     def device(self):
-        return torch.device("cuda" if self.args.cuda else "cpu")
+        return torch.device(self.args.cuda_name if self.args.cuda else "cpu")
 
     def get_actions(self, obs, goal):
         raise NotImplementedError
@@ -574,7 +719,10 @@ class Agent(BaseAgent):
                     'fsag_metric': FSAGMetricCritic,
                     'phi_ag_metric': PhiAGMetricCritic,
                     'state_asym_metric': StateAsymMetricCritic,
-                    'autoenc_sf': AutoEncSFCritic}[args.critic_type]
+                    'autoenc_sf': AutoEncSFCritic,
+                    'sa_metric': SACritic,
+                    'usfa_metric': USFACritic,
+                    'asg_metric': ASGCritic}[args.critic_type]
 
         self.actor = Actor(env_params, args)
         self.critic = CriticCls(env_params, args)

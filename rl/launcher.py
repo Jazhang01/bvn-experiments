@@ -27,10 +27,24 @@ def get_env_params(env_id):
 
     env.seed(100)
     obs = env.reset()
+    
+    if hasattr(env, 'goal_sampling_type'):
+      if env.goal_sampling_type == 'left':
+        init_gripper_xpos = env.initial_gripper_xpos[:3]
+        is_train_goal = lambda achieved_goal: achieved_goal[1] > init_gripper_xpos[1]
+      elif env.goal_sampling_type == 'right':
+        init_gripper_xpos = env.initial_gripper_xpos[:3]
+        is_train_goal = lambda achieved_goal: achieved_goal[1] < init_gripper_xpos[1]
+      else:
+        is_train_goal = lambda achieved_goal : False
+    else:
+      is_train_goal = lambda achieved_goal : True
+
     params = {'obs': obs['observation'].shape[0], 'goal': obs['desired_goal'].shape[0],
               'action': env.action_space.shape[0], 'action_max': env.action_space.high[0],
               'action_space': env.action_space,
-              'max_timesteps': env._max_episode_steps}
+              'max_timesteps': env._max_episode_steps,
+              'is_train_goal': is_train_goal}
     reward_func = env.compute_reward
     del env  # to avoid memory leak
     return params, reward_func

@@ -6,7 +6,7 @@ assert sys.version_info > (3, 6, 0), "Only support Python 3.6 and above."
 
 setup(
     name="bvn",
-    py_modules=["rl"],
+    py_modules=["rl", "goal_env"],
     install_requires=[
         "wandb",
         "cloudpickle",
