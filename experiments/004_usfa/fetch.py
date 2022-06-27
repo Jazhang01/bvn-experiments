@@ -14,34 +14,37 @@ if __name__ == '__main__':
     with Sweep(RUN, Args) as sweep:
         Args.cuda = False
         Args.cuda_name = 'cuda'
-        
+
         Args.record_video = False  # todo: when this is true, i get a "Offscreen framebuffer is not complete, error 0x8cdd"
         Args.clip_inputs = True
         Args.normalize_inputs = True
         Args.agent_type = 'ddpg'
-        Args.critic_type = 'state_asym_metric'
-        Args.critic_reduce_type = 'dot'
+        Args.critic_type = 'usfa_metric'
+        Args.critic_reduce_type = 'dot'  # this doesn't affect usfa implementation
         Args.hid_size = 176
         Args.metric_embed_dim = 16
         Args.smooth_targ_policy = False
-        
+
+        Args.update_with_predict_r = False
+
         Args.future_p = 0.8
         Args.do_relabel_filter = False
+        # Args.resume_ckpt = '/home/jason/bvn/experiments/004_usfa/bvn-no-her-attempt/bvn/bvn/train/ddpg/FetchPushLeft-v1/100/models/ep_0150'
         Args.resume_ckpt = ''
-        # Args.resume_ckpt = '/home/jason/bvn/experiments/002_bvn/bvn-push-left/bvn/bvn/train/ddpg/FetchPushLeft-v1/100/models/ep_0120'
 
         with sweep.product:
             with sweep.zip:
-                Args.env_name = ['FetchPush-v1']
-                Args.test_env_name = ['FetchPush-v1']
+                # reaching is easy, so skip for now
+                Args.env_name = ['FetchPushDense-v1']
+                Args.test_env_name = ['FetchPushDense-v1']
                 Args.n_workers = [8]
-                Args.n_epochs = [100]
+                Args.n_epochs = [200]
 
                 # Args.env_name = ['FetchReach-v1', 'FetchPush-v1', 'FetchPickAndPlace-v1', 'FetchSlide-v1']
                 # Args.n_workers = [2, 8, 16, 20]
                 # Args.n_epochs = [50, 150, 200, 500]
 
-            Args.seed = [400, 200, 300]
+            Args.seed = [100]
             # Args.seed = [100, 200, 300, 400, 500]  
 
     @sweep.each
