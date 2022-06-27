@@ -550,7 +550,7 @@ class USFACritic(nn.Module):
 
         sag = torch.cat([obses, actions / self.act_limit, goals], dim=-1)  # in the autoenc_sf implementation phi is passed into psi, why?
         psi_embeds = self.psi(sag)
-        w_embeds = self.xi(goals)
+        w_embeds = self.xi(goals).detach()
 
         return torch.bmm(psi_embeds.view(n_batch, 1, self.latent_dim), w_embeds.view(n_batch, self.latent_dim, 1)).view(n_batch).squeeze()
 
@@ -570,20 +570,12 @@ class SACritic(nn.Module):
             [self.obs_dim + self.act_dim] + [args.hid_size] * args.n_hids + [embed_dim],
             activation=args.activ
         )
-        # self.phi = net_utils.mlp(
-        #     [self.obs_dim + self.act_dim] + [embed_dim],
-        #     activation=args.activ
-        # )
         self.psi = net_utils.mlp(
             [self.obs_dim + self.act_dim] + [args.hid_size] * args.n_hids + [embed_dim],
             activation=args.activ
         )
-        # self.xi = net_utils.mlp(
-            # [self.goal_dim] + [args.hid_size] * args.n_hids + [embed_dim],
-            # activation=args.activ
-        # )
         self.xi = net_utils.mlp(
-            [self.obs_dim + self.goal_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            [self.goal_dim] + [args.hid_size] * args.n_hids + [embed_dim],
             activation=args.activ
         )
     
@@ -594,11 +586,9 @@ class SACritic(nn.Module):
         n_batch = pi_inputs.shape[0]
 
         # q = psi(s,a)^Tw(g)
-        sa = torch.cat([obses, actions / self.act_limit], dim=-1)  # in the autoenc_sf implementation phi is passed into psi, why?
-        sg = torch.cat([obses, goals], dim=-1)
+        sa = torch.cat([obses, actions / self.act_limit], dim=-1)
         phi_embeds = self.phi(sa)
-        # w_embeds = self.xi(goals)
-        w_embeds = self.xi(sg)
+        w_embeds = self.xi(goals)
 
         return torch.bmm(phi_embeds.view(n_batch, 1, self.latent_dim), w_embeds.view(n_batch, self.latent_dim, 1)).view(n_batch).squeeze()
 
@@ -609,11 +599,9 @@ class SACritic(nn.Module):
         n_batch = pi_inputs.shape[0]
 
         # q = psi(s,a)^Tw(g)
-        sa = torch.cat([obses, actions / self.act_limit], dim=-1)  # in the autoenc_sf implementation phi is passed into psi, why?
-        sg = torch.cat([obses, goals], dim=-1)
+        sa = torch.cat([obses, actions / self.act_limit], dim=-1)
         psi_embeds = self.psi(sa)
-        # w_embeds = self.xi(goals)
-        w_embeds = self.xi(sg)
+        w_embeds = self.xi(goals)
 
         return torch.bmm(psi_embeds.view(n_batch, 1, self.latent_dim), w_embeds.view(n_batch, self.latent_dim, 1)).view(n_batch).squeeze()
 

@@ -16,12 +16,12 @@ def sample_her_transitions(buffer, reward_func, batch_size, future_p=1.0, relabe
 
     future_offset = (np.random.uniform(size=batch_size) * (horizon - t_samples)).astype(int)
     future_t = (t_samples + 1 + future_offset)
-   
+    
     if relabel_filter is None:
         her_indexes = np.where(np.random.uniform(size=batch_size) < future_p)
     else:
         candidates = np.where(np.apply_along_axis(relabel_filter, 1, buffer['ag'][ep_idxes, future_t]))[0]
-        # candidates = np.where(np.apply_along_axis(relabel_filter, 1, batch['ag']))[0]  # this is wrong, but doesn't seem to make a big difference
+        # candidates = np.where(np.apply_along_axis(relabel_filter, 1, batch['ag']))[0]  # this is wrong
         her_indexes = np.random.choice(candidates, int(len(candidates)*future_p), replace=False)
         her_indexes = sorted(her_indexes)
 
