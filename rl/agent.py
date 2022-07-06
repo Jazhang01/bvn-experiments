@@ -113,6 +113,30 @@ class Actor(nn.Module):
         return pi_action
 
 
+class PixelActor(nn.Module):
+    def __init__(self, env_params, args):
+        assert 'image_obs' in env_params and env_params['image_obs'] is not None
+        assert len(env_params['image_obs']) == 3
+
+        super().__init__()
+        self.act_limit = env_params['action_max']
+
+        state_feature_dim = args.encoder_feature_dim
+        self.encoder = net_utils.Encoder(img_shape=env_params['image_obs'],
+                                         feature_dim=state_feature_dim)
+        self.net = net_utils.mlp(
+            [state_feature_dim + env_params['goal']] + [args.hid_size] * args.n_hids,
+            activation=args.activ, output_activation=args.activ)
+        self.mean = nn.Linear(args.hid_size, env_params['action'])
+    
+    def forward(self, obs, goal):
+        enc = self.encoder(obs)
+        outputs = self.net(torch.concat([enc, goal], dim=-1))
+        mean = self.mean(outputs)
+        pi_action = torch.tanh(mean) * self.act_limit
+        return pi_action
+
+
 # def squashed_diagonal_gaussian_head(x, out_dim):
 #     assert x.shape[-1] == out_dim * 2
 #     mean, log_scale = torch.chunk(x, 2, dim=1)
@@ -212,6 +236,30 @@ class Critic(nn.Module):
         q_values = self.net(q_inputs).squeeze()
         return q_values
 
+
+class PixelUVFACritic(nn.Module):
+    def __init__(self, env_params, args):
+        assert 'image_obs' in env_params and env_params['image_obs'] is not None
+        assert len(env_params['image_obs']) == 3
+
+        super().__init__()
+        self.act_limit = env_params['action_max']
+
+        state_feature_dim = args.encoder_feature_dim
+        self.encoder = net_utils.Encoder(img_shape=env_params['image_obs'],
+                                         feature_dim=state_feature_dim)
+        self.net = net_utils.mlp(
+            [state_feature_dim + env_params['goal'] + env_params['action']] +
+            [args.hid_size] * args.n_hids + [1],
+            activation=args.activ
+        )
+    
+    def forward(self, obs, goal, action):
+        enc = self.encoder(obs)
+        q = self.net(torch.cat([enc, goal, action / self.act_limit], dim=-1))
+        return q.squeeze()
+
+
 class StateAsymMetricCritic(nn.Module):
     '''
     Instead of phi(f(s,a), g) we use phi(s, g) to promote full-rank.
@@ -276,6 +324,62 @@ class StateAsymMetricCritic(nn.Module):
 
     def freeze_f(self):
         net_utils.set_requires_grad(self.f, False)
+
+
+class PixelBVNCritic(nn.Module):
+    def __init__(self, env_params, args):
+        assert 'image_obs' in env_params and env_params['image_obs'] is not None
+        assert len(env_params['image_obs']) == 3
+        assert args.critic_reduce_type == 'dot'  # others not implemented, dot is best
+
+        super().__init__()
+        self.args = args
+        self.act_limit = env_params['action_max']
+
+        obs_dim = env_params['image_obs']
+        act_dim = env_params['action']
+        goal_dim = env_params['goal']
+        embed_dim = args.metric_embed_dim
+        state_feature_dim = args.encoder_feature_dim
+
+        self.encoder = net_utils.Encoder(img_shape=obs_dim,
+                                         feature_dim=state_feature_dim)
+        self.f = net_utils.mlp(
+            [state_feature_dim + act_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+        self.phi = net_utils.mlp(
+            [state_feature_dim + goal_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+    
+    def forward(self, obs, goal, action):
+        s = self.encoder(obs)
+        sa = torch.cat([s, action / self.act_limit], dim=-1)
+        sg = torch.cat([s, goal], dim=-1)
+
+        f_sa = self.f(sa)
+        phi_sg = self.phi(sg)
+
+        q = torch.sum(f_sa * phi_sg, dim=1, keepdim=True).squeeze()
+        return q
+    
+    def reinit_phi(self):
+        for layer in self.phi.children():
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()
+
+    def reinit_f(self):
+        for layer in self.f.children():
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()
+
+    def freeze_phi(self):
+        net_utils.set_requires_grad(self.phi, False)
+
+    def freeze_f(self):
+        net_utils.set_requires_grad(self.f, False)
+
 
 class PhiAGMetricCritic(nn.Module):
     '''
@@ -555,6 +659,66 @@ class USFACritic(nn.Module):
         return torch.bmm(psi_embeds.view(n_batch, 1, self.latent_dim), w_embeds.view(n_batch, self.latent_dim, 1)).view(n_batch).squeeze()
 
 
+class PixelUSFACritic(nn.Module):
+    def __init__(self, env_params, args):
+        assert 'image_obs' in env_params and env_params['image_obs'] is not None
+        assert len(env_params['image_obs']) == 3
+
+        super().__init__()
+        self.args = args
+        self.act_limit = env_params['action_max']
+
+        obs_dim = env_params['image_obs']
+        act_dim = env_params['action']
+        goal_dim = env_params['goal']
+        embed_dim = args.metric_embed_dim
+        state_feature_dim = args.encoder_feature_dim
+
+        self.encoder = net_utils.Encoder(img_shape=obs_dim,
+                                         feature_dim=state_feature_dim)
+        self.phi = net_utils.mlp(
+            [state_feature_dim + act_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+        self.psi = net_utils.mlp(
+            [state_feature_dim + act_dim + goal_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+        self.xi = net_utils.mlp(
+            [goal_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+    
+    def forward_embeds(self, obs, goal, action):
+        s = self.encoder(obs)
+        sa = torch.cat([s, action / self.act_limit], dim=-1)
+        sag = torch.cat([s, action / self.act_limit, goal], dim=-1)
+
+        phi_sa = self.phi(sa)
+        psi_sa = self.psi(sag)
+        xi_g = self.xi(goal)
+
+        return phi_sa, psi_sa, xi_g
+
+    def forward_reward(self, obs, goal, action):
+        s = self.encoder(obs)
+        sa = torch.cat([s, action / self.act_limit], dim=-1)
+
+        phi_sa = self.phi(sa)
+        xi_g = self.xi(goal)
+
+        return torch.sum(phi_sa * xi_g, dim=-1, keepdim=True).squeeze()
+    
+    def forward(self, obs, goal, action):
+        s = self.encoder(obs)
+        sag = torch.cat([s, action / self.act_limit, goal], dim=-1)
+
+        psi_sa = self.psi(sag)
+        xi_g = self.xi(goal)
+
+        return torch.sum(psi_sa * xi_g, dim=1, keepdim=True).squeeze()
+
+
 class SACritic(nn.Module):
     def __init__(self, env_params, args):
         super().__init__()
@@ -604,6 +768,65 @@ class SACritic(nn.Module):
         w_embeds = self.xi(goals)
 
         return torch.bmm(psi_embeds.view(n_batch, 1, self.latent_dim), w_embeds.view(n_batch, self.latent_dim, 1)).view(n_batch).squeeze()
+
+
+class PixelSACritic(nn.Module):
+    def __init__(self, env_params, args):
+        assert 'image_obs' in env_params and env_params['image_obs'] is not None
+        assert len(env_params['image_obs']) == 3
+
+        super().__init__()
+        self.args = args
+        self.act_limit = env_params['action_max']
+
+        obs_dim = env_params['image_obs']
+        act_dim = env_params['action']
+        goal_dim = env_params['goal']
+        embed_dim = args.metric_embed_dim
+        state_feature_dim = args.encoder_feature_dim
+
+        self.encoder = net_utils.Encoder(img_shape=obs_dim,
+                                         feature_dim=state_feature_dim)
+        self.phi = net_utils.mlp(
+            [state_feature_dim + act_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+        self.psi = net_utils.mlp(
+            [state_feature_dim + act_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+        self.xi = net_utils.mlp(
+            [goal_dim] + [args.hid_size] * args.n_hids + [embed_dim],
+            activation=args.activ
+        )
+    
+    def forward_embeds(self, obs, goal, action):
+        s = self.encoder(obs)
+        sa = torch.cat([s, action / self.act_limit], dim=-1)
+
+        phi_sa = self.phi(sa)
+        psi_sa = self.psi(sa)
+        xi_g = self.xi(goal)
+
+        return phi_sa, psi_sa, xi_g
+    
+    def forward_reward(self, obs, goal, action):
+        s = self.encoder(obs)
+        sa = torch.cat([s, action / self.act_limit], dim=-1)
+
+        phi_sa = self.phi(sa)
+        xi_g = self.xi(goal)
+
+        return torch.sum(phi_sa * xi_g, dim=-1, keepdim=True).squeeze()
+    
+    def forward(self, obs, goal, action):
+        s = self.encoder(obs)
+        sa = torch.cat([s, action / self.act_limit], dim=-1)
+
+        psi_sa = self.psi(sa)
+        xi_g = self.xi(goal)
+
+        return torch.sum(psi_sa * xi_g, dim=1, keepdim=True).squeeze()
 
 
 class ASGCritic(nn.Module):
@@ -808,6 +1031,114 @@ class Agent(BaseAgent):
         self.critic_targ.load_state_dict(state_dict['critic_targ'])
         self.o_normalizer.load_state_dict(state_dict['o_normalizer'])
         self.g_normalizer.load_state_dict(state_dict['g_normalizer'])
+
+
+class PixelDDPGAgent(BaseAgent):
+    def __init__(self, env_params, args, name='pixel_agent'):
+        super().__init__(env_params, args, name=name)
+
+        CriticCls = {
+            'state_asym_metric': PixelBVNCritic,
+            'td': PixelUVFACritic,
+            'sa_metric': PixelSACritic,
+            'usfa_metric': PixelUSFACritic
+        }[args.critic_type]
+
+        self.actor = PixelActor(env_params, args)
+        self.critic = CriticCls(env_params, args)
+
+        self.actor_targ = PixelActor(env_params, args)
+        self.critic_targ = CriticCls(env_params, args)
+
+        self.actor_targ.load_state_dict(self.actor.state_dict())
+        self.critic_targ.load_state_dict(self.critic.state_dict())
+
+        net_utils.set_requires_grad(self.actor_targ, allow_grad=False)
+        net_utils.set_requires_grad(self.critic_targ, allow_grad=False)
+
+        if self.args.cuda:
+            self.cuda()
+
+        self.o_normalizer = Normalizer(size=np.prod(env_params['image_obs']), 
+                                       default_clip_range=self.args.clip_range)
+        self.g_normalizer = Normalizer(size=env_params['goal'], 
+                                       default_clip_range=self.args.clip_range)
+    
+    def cuda(self):
+        self.actor.cuda(self.device)
+        self.critic.cuda(self.device)
+        self.actor_targ.cuda(self.device)
+        self.critic_targ.cuda(self.device)  
+    
+    def _clip_inputs(self, obs, goal):
+        # add conditional here
+        if self.args.clip_inputs:
+            obs = np.clip(obs, -self.args.clip_obs, self.args.clip_obs)
+            goal = np.clip(goal, -self.args.clip_obs, self.args.clip_obs)
+        return obs, goal
+
+    def _normalize_inputs(self, obs, goal):
+        if self.args.normalize_inputs:
+            obs = self.o_normalizer.normalize(obs)
+            goal = self.g_normalizer.normalize(goal)
+        return obs, goal
+    
+    def _process_all_inputs(self, obs, goal):
+        obs, goal = self._clip_inputs(obs, goal)
+        obs, goal = self._normalize_inputs(obs, goal)
+        obs, goal = self.to_tensor(obs), self.to_tensor(goal)
+        return obs, goal
+    
+    def get_actions(self, obs, goal):
+        obs, goal = self._process_all_inputs(obs, goal)
+        with torch.no_grad():
+            actions = self.actor(obs, goal).cpu().numpy().squeeze()
+        return actions
+
+    def get_pis(self, obs, goal):
+        obs, goal = self._process_all_inputs(obs, goal)
+        pis = self.actor(obs, goal)
+        return pis
+    
+    def get_qs(self, obs, goal, actions):
+        obs, goal = self._process_all_inputs(obs, goal)
+        actions = self.to_tensor(actions)
+        return self.critic(obs, goal, actions)
+    
+    def forward(self, obs, goal, q_target=False, pi_target=False):
+        obs, goal = self._process_all_inputs(obs, goal)
+        q_net = self.critic_targ if q_target else self.critic
+        a_net = self.actor_targ if pi_target else self.actor
+        pis = a_net(obs, goal)
+        return q_net(obs, goal, pis), pis
+
+    def target_update(self):
+        net_utils.target_soft_update(source=self.actor, target=self.actor_targ, polyak=self.args.polyak)
+        net_utils.target_soft_update(source=self.critic, target=self.critic_targ, polyak=self.args.polyak)
+
+    def normalizer_update(self, obs, goal):
+        obs, goal = self._clip_inputs(obs, goal)
+        self.o_normalizer.update(obs)
+        self.g_normalizer.update(goal)
+        self.o_normalizer.recompute_stats()
+        self.g_normalizer.recompute_stats()
+
+    def state_dict(self):
+        return {'actor': self.actor.state_dict(),
+                'actor_targ': self.actor_targ.state_dict(),
+                'critic': self.critic.state_dict(),
+                'critic_targ': self.critic_targ.state_dict(),
+                'o_normalizer': self.o_normalizer.state_dict(),
+                'g_normalizer': self.g_normalizer.state_dict()}
+
+    def load_state_dict(self, state_dict):
+        self.actor.load_state_dict(state_dict['actor'])
+        self.actor_targ.load_state_dict(state_dict['actor_targ'])
+        self.critic.load_state_dict(state_dict['critic'])
+        self.critic_targ.load_state_dict(state_dict['critic_targ'])
+        self.o_normalizer.load_state_dict(state_dict['o_normalizer'])
+        self.g_normalizer.load_state_dict(state_dict['g_normalizer'])
+
 
 class TD3Agent(Agent):
     def __init__(self, env_params, args, name='agent'):

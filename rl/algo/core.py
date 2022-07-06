@@ -403,3 +403,133 @@ class OfflineAlgo(Algo):
             if Args.checkpoint_freq and epoch % Args.checkpoint_freq == 0:
                 self.save_checkpoint(f"models/ep_{epoch:04d}")
                 logger.remove(f"models/{epoch - Args.checkpoint_freq:04d}_cp")
+
+class TempOfflineAlgoForPixel(Algo):
+    def __init__(self, *, env, test_env=None, env_params, args, agent, replay, test_replay, learner, reward_func,
+                 name='algo'):
+        super().__init__(env=env, test_env=test_env, env_params=env_params, args=args, agent=agent, replay=replay,
+                         learner=learner, reward_func=reward_func, name=name)
+        self.test_replay = test_replay
+
+    def best_random_action(self, env, ob, bg, n=100):
+        k = len(ob)
+        actions = np.array([env.action_space.sample() for _ in range(n)])
+        actions_repeat = actions.repeat(k, axis=0)
+        ob_repeat = np.tile(ob, (n, 1, 1, 1))
+        bg_repeat = np.tile(bg, (n, 1))
+        qs = self.agent.get_qs(ob_repeat, bg_repeat, actions_repeat).reshape(n, k)
+        best = qs.argmax(axis=0).detach().cpu().numpy()
+        # actions = np.array([np.expand_dims(env.action_space.sample(), axis=0) for _ in range(n)])
+        # qs = np.array([self.agent.get_qs(ob, bg, a.repeat(len(ob), axis=0)).detach().cpu().numpy() for a in actions])
+        # best = qs.argmax(axis=0)
+
+        return actions[best]
+
+    def run_simple_eval(self, video_path=None, max_episode_steps=30):
+        env = self.test_env or self.env
+
+        total_success_count = 0
+        total_trial_count = 0
+        frames = []
+        for n_test in range(self.args.n_test_rollouts):
+            info = None
+            observation = env.reset()
+            ob = observation['image_observation']
+            bg = observation['desired_goal']
+            if n_test == 0:
+                frames.append(ob)
+            for timestep in range(max_episode_steps):
+                a = self.best_random_action(env, ob, bg, n=500)
+                # if timestep % 2 == 0:
+                # else:
+                #     a = self.agent.get_actions(ob, bg)
+                observation, r, d, info = env.step(a)
+                ob = observation['image_observation']
+                bg = observation['desired_goal']
+                if n_test == 0:
+                    frames.append(ob)
+
+            for per_env_info in [info] if isinstance(info, dict) else info:
+                total_trial_count += 1
+                if per_env_info['is_success']:
+                    total_success_count += 1
+        
+        if video_path and Args.record_video:
+            frames = np.array(frames)
+            frames = np.concatenate(frames.transpose([1, 0, 4, 3, 2]))
+            self.logger.save_video(frames, video_path)
+
+        success_rate = total_success_count / total_trial_count
+        # if mpi_utils.use_mpi():
+        #     success_rate = mpi_utils.global_mean(np.array([success_rate]))[0]
+
+        return success_rate
+    
+    def loss_from_test_replay(self):
+        batch = self.test_replay.sample(2048)
+        return self.learner.critic_loss(batch)
+
+    def run(self):
+        logger = self.logger
+        print('Working dir: {}'.format(os.getcwd()))
+        home = os.path.expanduser("~")
+        # offline_replay_path = f'{home}/offline_dataset/{self.args.env_name}/mixed_replay.pkl'
+        # print('Load replay buffer from {}'.format(offline_replay_path))
+        # self.replay.load_state_dict(torch.load(offline_replay_path))
+
+        self.agent.normalizer_update(obs=self.replay.buffers['ob'], goal=self.replay.buffers['bg'])
+
+        for epoch in range(self.args.n_epochs + 1):
+            if mpi_utils.is_root():
+                logger.print('Epoch %d: Iter (out of %d)=' % (epoch, self.args.n_cycles), end=' ', flush=True)
+                sys.stdout.flush()
+
+            for n_iter in range(self.args.n_cycles):                
+                if mpi_utils.is_root():
+                    logger.print("%d" % n_iter, end=' ' if n_iter < self.args.n_cycles - 1 else '\n', flush=True)
+                    sys.stdout.flush()
+                    sys.stderr.flush()                
+                for _ in range(self.num_envs):
+                    self.agent_optimize(epoch)                
+            
+            env_name = Args.test_env_name or Args.env_name
+            # success_rate = self.run_eval(video_path=f"videos/epoch_{epoch:04d}/{env_name.split(':')[-1]}_agent.mp4")
+            success_rate = self.run_simple_eval(
+                    video_path=f"videos/epoch_{epoch:04d}/{env_name.split(':')[-1]}_agent.mp4",
+                    max_episode_steps=100)
+            test_loss_critic = self.loss_from_test_replay()
+
+            if epoch % 10:
+                logger.remove(f"videos/epoch_{epoch - 10:04d}")
+
+            if mpi_utils.is_root():
+                logger.print(f'Epoch {epoch} eval success rate {success_rate:.3f}')
+
+            key_values = {
+                'epoch': epoch,
+                'test/success': success_rate,              
+                'time': logger.since('start'),
+                'opt_steps': self.opt_steps,
+                'test_loss_critic': test_loss_critic.item()
+            }      
+
+            logger.log_metrics_summary(key_values=key_values, default_stats='mean')
+
+            if Args.checkpoint_freq and epoch % Args.checkpoint_freq == 0:
+                self.save_checkpoint(f"models/ep_{epoch:04d}")
+                logger.remove(f"models/{epoch - Args.checkpoint_freq:04d}_cp")
+    
+    def fit_replay(self, logger, steps=10000):
+        for step in range(steps):
+            batch = self.replay.sample(self.args.batch_size)
+            log_info = self.learner.update_critic_supervised(batch)
+
+            logger.log(log_info, step=step)
+            
+            test_batch = self.test_replay.sample(self.args.batch_size)
+            _, log_info_test = self.learner.critic_loss_supervised(test_batch)
+            log_info_test = dict((f'{key}_test', value) for key, value in log_info_test.items())
+            
+            logger.log(log_info_test, step=step)
+            
+            print(f'train: {log_info}\t test: {log_info_test}')

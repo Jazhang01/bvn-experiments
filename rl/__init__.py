@@ -13,6 +13,11 @@ class Args(PrefixProto):
     train_type = 'online'
     agent_type = 'ddpg'
 
+    ### For pixel level observations
+    pixel_obs = False
+    encoder_feature_dim = 32  # mostly arbitrary, many state vec dim ~= 32
+    ### For pixel level observations
+
     # For SAC
     policy_output_scale = 1.0
     initial_temperature = 1.0
@@ -32,7 +37,7 @@ class Args(PrefixProto):
     # Critic type
     critic_type = 'td'
     # norm, dot
-    critic_reduce_type = 'norm'
+    critic_reduce_type = 'dot'
     
     metric_embed_dim = 16
     

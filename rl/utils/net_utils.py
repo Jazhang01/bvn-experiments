@@ -89,3 +89,61 @@ def convert_to_2d_tensor(x):
     if x.ndim == 1:
         x = x.reshape(1, -1)
     return x
+
+
+# w: input size, k: kernel size, p: padding, s: stride
+def conv_output_size(w, k, p, s):
+    return (w - k + 2*p) // s + 1
+
+
+class Encoder(nn.Module):
+    def __init__(self, img_shape, feature_dim,
+                num_conv_layers=4, num_filters=32, kernel_size=3):
+        super().__init__()
+
+        assert len(img_shape) == 3
+        self.img_shape = img_shape
+        self.num_conv_layers = num_conv_layers
+        self.num_filters = num_filters
+        self.feature_dim = feature_dim
+        self.kernel_size = kernel_size
+
+        self.output_dim = self.calculate_output_dim()
+        
+        self.convs = nn.ModuleList([
+            nn.Conv2d(img_shape[0], num_filters, kernel_size, stride=2)
+        ])
+        for _ in range(1, num_conv_layers):
+            self.convs.append(nn.Conv2d(num_filters, num_filters, kernel_size, stride=1))
+        
+        self.head = nn.Sequential(
+            nn.Linear(num_filters * self.output_dim * self.output_dim, feature_dim),
+            nn.LayerNorm(feature_dim)
+        )
+    
+    def calculate_output_dim(self):
+        output_dim = conv_output_size(self.img_shape[-1], self.kernel_size, 0, 2)
+        for _ in range(1, self.num_conv_layers):
+            output_dim = conv_output_size(output_dim, self.kernel_size, 0, 1)
+        return output_dim
+    
+    def forward_conv(self, img):
+        img = img / 255.
+        conv = torch.relu(self.convs[0](img))
+
+        for i in range(1, self.num_conv_layers):
+            conv = torch.relu(self.convs[i](conv))
+
+        h = conv.view(conv.size(0), -1)
+        return h
+
+    def forward(self, img, detach=False):
+        h = self.forward_conv(img)
+
+        if detach:
+            h = h.detach()
+        
+        out = self.head(h)
+        out = torch.tanh(out)
+        return out
+

@@ -14,18 +14,7 @@ from rl.replays.her import Replay
 from rl.utils import vec_env
 
 
-def get_env_params(env_id):
-    env = gym.make(env_id)
-    # import ipdb; ipdb.set_trace()
-    # if env_id == 'Point2D-Easy-UWall-Hard-Init-v2':
-    #     env = TimeLimit(GymComputeRewardInterfaceWrapper(env), max_episode_steps=200)
-    # elif not isinstance(env.env, TimeLimit):
-    #     # HACK: we know multiworld env has no TimeLimit Wrapper
-    #     env = GymComputeRewardInterfaceWrapper(env)        
-    #     env = TimeLimit(env, max_episode_steps=50)
-    #     print('No time limit specified. Use timelimt=50')
-
-    env.seed(100)
+def get_env_params_from_env(env):
     obs = env.reset()
     
     if hasattr(env, 'goal_sampling_type'):
@@ -40,14 +29,37 @@ def get_env_params(env_id):
     else:
       is_train_goal = lambda achieved_goal : True
 
-    params = {'obs': obs['observation'].shape[0], 'goal': obs['desired_goal'].shape[0],
-              'action': env.action_space.shape[0], 'action_max': env.action_space.high[0],
+    params = {'obs': obs['observation'].shape[0],
+              'image_obs': obs['image_observation'].shape if 'image_observation' in obs.keys() else None,
+              'goal': obs['desired_goal'].shape[0],
+              'action': env.action_space.shape[0], 
+              'action_max': env.action_space.high[0],
               'action_space': env.action_space,
-              'max_timesteps': env._max_episode_steps,
+              'max_timesteps': env._max_episode_steps if hasattr(env, '_max_episode_steps') else None,
               'is_train_goal': is_train_goal}
     reward_func = env.compute_reward
     del env  # to avoid memory leak
     return params, reward_func
+
+def get_env_params(env_id):
+    env = gym.make(env_id)
+
+    if env_id == 'SawyerRigAffordances-v6':
+        from roboverse.utils.renderer import EnvRenderer, InsertImageEnv
+        imsize = env.obs_img_dim
+
+        renderer_kwargs=dict(
+                create_image_format='HWC',
+                output_image_format='CWH',
+                width=imsize,
+                height=imsize,
+                flatten_image=False)
+
+        renderer = EnvRenderer(init_camera=None, **renderer_kwargs)
+        env = InsertImageEnv(env, renderer=renderer)
+
+    env.seed(100)
+    return get_env_params_from_env(env)
 
 
 def get_env_with_id(num_envs, env_id):

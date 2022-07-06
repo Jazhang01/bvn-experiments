@@ -1,5 +1,6 @@
 from rl.agent import Critic
 import numpy as np
+from rl.utils.logger import WandBLogger
 import torch
 import torch.nn as nn
 from torch.optim import Adam
@@ -253,8 +254,8 @@ class Learner:
         ### get items from batch
         o, a, o2, r, bg = batch['ob'], batch['a'], batch['o2'], batch['r'], batch['bg']
         r = self.agent.to_tensor(r.flatten())
-        r_ag_ag2 = self.agent.to_tensor(batch['r_ag_ag2'].flatten())
-        r_future_ag = self.agent.to_tensor(batch['r_future_ag'].flatten())
+        # r_ag_ag2 = self.agent.to_tensor(batch['r_ag_ag2'].flatten())
+        # r_future_ag = self.agent.to_tensor(batch['r_future_ag'].flatten())
 
         ag, ag2, future_ag, offset = batch['ag'], batch['ag2'], batch['future_ag'], batch['offset']
         offset = self.agent.to_tensor(offset.flatten())
@@ -272,7 +273,8 @@ class Learner:
                             loss_critic=loss_critic.item(),
                             offset=offset.mean().item(),
                             loss_r=loss_r.mean().item(),
-                            r=r, r_ag_ag2=r_ag_ag2, r_future_ag=r_future_ag)
+                            # r_ag_ag2=r_ag_ag2, r_future_ag=r_future_ag,
+                            r=r)
 
         return loss_critic
 
@@ -281,11 +283,11 @@ class Learner:
         ### get items from batch
         o, a, o2, r, bg = batch['ob'], batch['a'], batch['o2'], batch['r'], batch['bg']
         ag, ag2, future_ag, offset = batch['ag'], batch['ag2'], batch['future_ag'], batch['offset']
-        r_ag_ag2, r_future_ag = batch['r_ag_ag2'], batch['r_future_ag']
+        # r_ag_ag2, r_future_ag = batch['r_ag_ag2'], batch['r_future_ag']
 
         r = self.agent.to_tensor(r.flatten())
-        r_ag_ag2 = self.agent.to_tensor(r_ag_ag2.flatten())
-        r_future_ag = self.agent.to_tensor(r_future_ag.flatten())
+        # r_ag_ag2 = self.agent.to_tensor(r_ag_ag2.flatten())
+        # r_future_ag = self.agent.to_tensor(r_future_ag.flatten())
         offset = self.agent.to_tensor(offset.flatten())
         ### get items from batch
 
@@ -309,7 +311,8 @@ class Learner:
                             loss_critic=loss_critic.item(),
                             offset=offset.mean().item(),
                             loss_r=loss_r.mean().item(),
-                            r=r, r_ag_ag2=r_ag_ag2, r_future_ag=r_future_ag)
+                            # r_ag_ag2=r_ag_ag2, r_future_ag=r_future_ag,
+                            r=r)
 
         return loss_critic
 
@@ -470,6 +473,142 @@ class Learner:
         load_path = osp.join(path, self._save_file)
         state_dict = torch.load(load_path)
         self.load_state_dict(state_dict)
+
+
+class PixelLearner(Learner):
+    def __init__(self, agent, args, name='pixel_learner'):
+        assert not args.update_with_predict_r or args.critic_type in ['sa_metric', 'usfa_metric']
+
+        super().__init__(agent, args, name)
+    
+    def calc_loss_q_supervised(self, o, a, g, q_targ):
+        q = self.agent.get_qs(o, g, a)
+        loss_q = (q - q_targ).pow(2).mean()
+
+        return loss_q
+
+    def calc_loss_q(self, o, a, o2, g, r=None, predict_reward=False, backprop_predict_r=False):
+        assert predict_reward or r is not None
+        assert not (backprop_predict_r and not predict_reward)
+
+        if predict_reward:
+            action = self.agent.to_tensor(a)
+            pi_inputs = self.agent._process_all_inputs(o, g)
+            r = self.agent.critic.forward_reward(pi_inputs, action)
+        
+        # q target
+        q_next, _ = self.agent.forward(o2, g, q_target=True, pi_target=True)
+        if backprop_predict_r:
+            q_targ = r + self.args.gamma * q_next.detach()
+        else:
+            q_targ = r.detach() + self.args.gamma * q_next.detach()
+        q_targ = torch.clamp(q_targ, -self.args.clip_return, 0.0)
+
+        # q loss
+        q = self.agent.get_qs(o, g, a)
+        loss_q = (q - q_targ).pow(2).mean()
+
+        return loss_q
+    
+    def calc_loss_r(self, o, a, g, r):
+        action = self.agent.to_tensor(a)
+        obs, goal = self.agent._process_all_inputs(o, g)
+        pred_r = self.agent.critic.forward_reward(obs, goal, action)
+
+        loss_r = (pred_r - r).pow(2).mean()
+        
+        return loss_r
+
+    def calc_loss_sf(self, o, a, o2, a2, g):
+        o, g = self.agent._process_all_inputs(o, g)
+        o2, g = self.agent._process_all_inputs(o2, g)
+
+        a = self.agent.to_tensor(a)
+        a2 = self.agent.to_tensor(a2)
+        # a2 = self.agent.actor_targ(o2, g)
+
+        phi, psi, xi = self.agent.critic.forward_embeds(o, g, a)
+        _, psi2, _ = self.agent.critic.forward_embeds(o2, g, a2)
+        target_psi = phi + self.args.gamma * psi2
+        
+        loss_sf = F.mse_loss(psi, target_psi.detach())
+
+        return loss_sf
+
+    def critic_loss(self, batch):
+        o, a, o2, r, bg = batch['ob'], batch['a'], batch['o2'], batch['r'], batch['bg']
+        r = self.agent.to_tensor(r.flatten())
+
+        loss_q_bg = self.calc_loss_q(o, a, o2, bg, r, predict_reward=self.args.update_with_predict_r,
+                                                      backprop_predict_r=self.args.update_with_predict_r)
+        loss_critic = loss_q_bg.mean()
+        if self.args.critic_type in ['sa_metric', 'usfa_metric']:
+            loss_r = self.calc_loss_r(o, a, bg, r)
+            loss_critic += loss_r
+
+            with torch.no_grad():
+                self.logger.store(loss_r=loss_r.mean().item())
+        
+        with torch.no_grad():
+            self.logger.store(loss_q=loss_q_bg.item(),
+                              loss_critic=loss_critic.item(),
+                              r=r)
+        return loss_critic
+    
+    def critic_loss_supervised(self, batch):
+        o, a, o2, a2, r, bg, q = batch['ob'], batch['a'], batch['o2'], batch['a2'], batch['r'], batch['bg'], batch['q']
+        r = self.agent.to_tensor(r.flatten())
+        q = self.agent.to_tensor(q.flatten())
+
+        log_info = {}
+
+        loss_q = self.calc_loss_q_supervised(o, a, bg, q)
+        if self.args.critic_type in ['sa_metric', 'usfa_metric']:
+            loss_r = self.calc_loss_r(o, a, bg, r)
+            loss_sf = self.calc_loss_sf(o, a, o2, a2, bg)
+
+            loss_critic = loss_q + loss_r
+
+            log_info['loss_r'] = loss_r.mean().item()
+            log_info['loss_sf'] = loss_sf.mean().item()
+        else:
+            loss_critic = loss_q
+        
+        log_info['loss_q'] = loss_q.item()
+        log_info['loss_critic'] = loss_critic.item()
+        log_info['r'] = r.mean().item()
+
+        return loss_critic, log_info
+
+    def actor_loss(self, batch):
+        o, a, bg = batch['ob'], batch['a'], batch['bg']
+
+        a = self.agent.to_tensor(a)
+
+        q_pi, pi = self.agent.forward(o, bg)
+        action_l2 = (pi / self.agent.actor.act_limit).pow(2).mean()
+        loss_actor = (- q_pi).mean() + self.args.action_l2 * action_l2
+
+        with torch.no_grad():
+            self.logger.store(loss_actor=loss_actor.item(),
+                              action_l2=action_l2.item(),
+                              q_pi=q_pi.mean().cpu().numpy())
+
+        return loss_actor
+    
+    def update_critic_supervised(self, batch):
+        loss_critic, log_info = self.critic_loss_supervised(batch)
+        self.optim_q.zero_grad()
+        loss_critic.backward()
+        self.optim_q.step()
+        return log_info
+    
+    def update_actor(self, batch):
+        loss_actor = self.actor_loss(batch)
+        self.optim_pi.zero_grad()
+        loss_actor.backward()
+        self.optim_pi.step()
+
 
 class TD3Learner(Learner):
     def __init__(
